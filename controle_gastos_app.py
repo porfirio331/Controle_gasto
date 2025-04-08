@@ -2,73 +2,55 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import date
+import io
 
-st.set_page_config(page_title="Controle de Gastos Familiares", layout="centered")
+st.set_page_config(page_title="Controle de Gastos Familiares", layout="wide")
+
+if "dados" not in st.session_state:
+    st.session_state.dados = pd.DataFrame(columns=["Data", "Descrição", "Valor", "Categoria"])
 
 st.title("Controle de Gastos Familiares")
 
-# Inicialização do estado
-if "dados" not in st.session_state:
-    st.session_state.dados = pd.DataFrame(columns=["Data", "Categoria", "Descrição", "Valor", "Tipo", "Forma de Pagamento", "Observações"])
-
-# Formulário de entrada de dados
-with st.form("entrada_dados"):
-    st.subheader("Nova Transação")
-    col1, col2 = st.columns(2)
-    data = col1.date_input("Data", value=date.today())
-    categoria = col2.selectbox("Categoria", ["Alimentação", "Transporte", "Lazer", "Saúde", "Moradia", "Educação", "Outros"])
-    descricao = st.text_input("Descrição")
-    valor = st.number_input("Valor", min_value=0.0, step=0.01)
-    tipo = st.radio("Tipo", ["Entrada", "Saída"], horizontal=True)
-    forma_pagamento = st.selectbox("Forma de Pagamento", ["Dinheiro", "Cartão", "Transferência", "Pix", "Outros"])
-    observacoes = st.text_input("Observações")
-
+with st.form("form_lancamento"):
+    col1, col2, col3 = st.columns([2, 4, 2])
+    data = col1.date_input("Data")
+    descricao = col2.text_input("Descrição")
+    valor = col3.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f")
+    categoria = st.selectbox("Categoria", ["Alimentação", "Transporte", "Moradia", "Lazer", "Saúde", "Outros"])
     submitted = st.form_submit_button("Adicionar")
-    if submitted:
-        nova_linha = {
-            "Data": data,
-            "Categoria": categoria,
-            "Descrição": descricao,
-            "Valor": valor,
-            "Tipo": tipo,
-            "Forma de Pagamento": forma_pagamento,
-            "Observações": observacoes
-        }
-        st.session_state.dados = pd.concat([st.session_state.dados, pd.DataFrame([nova_linha])], ignore_index=True)
-        st.success("Transação adicionada com sucesso!")
 
-# Exibir tabela
-st.subheader("Todas as Transações")
+    if submitted and descricao and valor:
+        novo = {"Data": data, "Descrição": descricao, "Valor": valor, "Categoria": categoria}
+        st.session_state.dados = pd.concat([st.session_state.dados, pd.DataFrame([novo])], ignore_index=True)
+        st.success("Gasto adicionado com sucesso!")
+
+st.markdown("---")
+st.subheader("Tabela de Gastos")
 st.dataframe(st.session_state.dados, use_container_width=True)
 
-# Resumo
-st.subheader("Resumo Financeiro")
-total_entradas = st.session_state.dados.query("Tipo == 'Entrada'")["Valor"].sum()
-total_saidas = st.session_state.dados.query("Tipo == 'Saída'")["Valor"].sum()
-saldo = total_entradas - total_saidas
+col1, col2 = st.columns([1, 1])
+total_gasto = st.session_state.dados["Valor"].sum()
+col1.metric("Total Gasto", f"R$ {total_gasto:,.2f}")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Entradas", f"R$ {total_entradas:,.2f}")
-col2.metric("Saídas", f"R$ {total_saidas:,.2f}")
-col3.metric("Saldo", f"R$ {saldo:,.2f}")
+# Criar um botão para exportar como Excel
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    st.session_state.dados.to_excel(writer, index=False, sheet_name='Gastos')
 
-# Gráfico de categorias
-st.subheader("Gastos por Categoria")
-gastos_categoria = st.session_state.dados.query("Tipo == 'Saída'").groupby("Categoria")["Valor"].sum()
+output.seek(0)
 
-if not gastos_categoria.empty:
+col2.download_button(
+    label="Baixar como Excel",
+    data=output,
+    file_name="controle_gastos.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+# Gráfico de gastos por categoria
+if not st.session_state.dados.empty:
+    st.subheader("Distribuição de Gastos por Categoria")
     fig, ax = plt.subplots()
-    gastos_categoria.plot.pie(ax=ax, autopct="%.1f%%", startangle=90)
-    ax.set_ylabel("")
+    st.session_state.dados.groupby("Categoria")["Valor"].sum().plot.pie(
+        autopct="%.1f%%", ax=ax, figsize=(6, 6), ylabel=""
+    )
     st.pyplot(fig)
-else:
-    st.info("Nenhum gasto registrado para exibir o gráfico.")
-
-# Exportar dados
-st.subheader("Exportar Dados")
-col1, col2 = st.columns(2)
-if col1.download_button("Baixar como CSV", st.session_state.dados.to_csv(index=False).encode("utf-8"), file_name="controle_gastos.csv"):
-    st.success("Arquivo CSV gerado com sucesso.")
-if col2.download_button("Baixar como Excel", st.session_state.dados.to_excel(index=False, engine="openpyxl"), file_name="controle_gastos.xlsx"):
-    st.success("Arquivo Excel gerado com sucesso.")
